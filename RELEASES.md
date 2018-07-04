@@ -1,5 +1,35 @@
 A brief list of new features and changes introduced with the specified version.
 
+### 0.11.0
+* [Switch to 'each_with_object' in WithReducer](https://github.com/adomokos/light-service/pull/149).
+
+### 0.10.3
+* [Adding ContextFactory](https://github.com/adomokos/light-service/pull/147).
+
+### 0.10.2
+* [Revert 0.10.1](https://github.com/adomokos/light-service/pull/146), it breaks tests in our apps :-(.
+
+### 0.10.1
+* [Fixing ContextFactory](https://github.com/adomokos/light-service/pull/141) for orchestrator methods in Organizers.
+
+### 0.10.0
+* Adding [before_actions and after_actions hooks](https://github.com/adomokos/light-service/pull/144).
+
+### 0.9.0
+* [Deprecate Orchestrator](https://github.com/adomokos/light-service/pull/132) by moving its functionality to Organizers.
+
+### 0.8.4
+* Only pass [default argument](https://github.com/adomokos/light-service/pull/123) to Hash#fetch in context if no block given.
+
+### 0.8.3
+* Make logging more [efficient](https://github.com/adomokos/light-service/pull/120) the context.
+
+### 0.8.2
+* A better way to [inspect](https://github.com/adomokos/light-service/pull/110) the context.
+* [Short-circuiting](https://github.com/adomokos/light-service/pull/113) the Orchestrator methods.
+* [Fail and return - with one call](https://github.com/adomokos/light-service/pull/115), no `and next` is needed.
+* Adding [with_callback](https://github.com/adomokos/light-service/pull/116) to Orchestrators, allows us to process large data in smaller chunks.
+
 ### 0.8.1
 * Renaming `skip_all!` to [skip_remaining!](https://github.com/adomokos/light-service/pull/103).
 * Adding [ContextFactory](https://github.com/adomokos/light-service/pull/107) for easier testing.

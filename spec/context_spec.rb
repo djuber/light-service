@@ -1,7 +1,7 @@
-require "spec_helper"
+require 'spec_helper'
 require 'test_doubles'
 
-describe LightService::Context do
+RSpec.describe LightService::Context do
   let(:context) { LightService::Context.make }
 
   describe "can be made" do
@@ -160,6 +160,14 @@ describe LightService::Context do
   it "can contain false values" do
     context = LightService::Context.make(:foo => false)
     expect(context[:foo]).to eq false
+  end
+
+  it "allows a default value for #fetch" do
+    expect(context.fetch(:madeup, :default)).to eq(:default)
+  end
+
+  it "allows a default block value for #fetch" do
+    expect(context.fetch(:madeup) { :default }).to eq(:default)
   end
 
   context "when aliases are included via .make" do

@@ -30,26 +30,15 @@ module TestDoubles
     executed(&:fail!)
   end
 
-  class AddOneAction
-    extend LightService::Action
-    expects :number
-    promises :number
-
-    executed do |ctx|
-      ctx.number += 1
-      ctx.message = 'Added 1'
-    end
-  end
-
   class AddTwoOrganizer
     extend LightService::Organizer
     def self.call(context)
-      with(context).reduce([AddOneAction, AddOneAction])
+      with(context).reduce([AddsOneAction, AddsOneAction])
     end
   end
 
   class AroundEachNullHandler
-    def self.call(_action, _context)
+    def self.call(_action)
       yield
     end
   end
@@ -113,6 +102,36 @@ module TestDoubles
     end
   end
 
+  class NotExplicitlyReturningContextOrganizer
+    extend LightService::Organizer
+
+    def self.call(context)
+      context[:foo] = [1, 2, 3]
+    end
+  end
+
+  class NestingOrganizer
+    extend LightService::Organizer
+
+    def self.call(context)
+      with(context).reduce(actions)
+    end
+
+    def self.actions
+      [NotExplicitlyReturningContextOrganizer, NestedAction]
+    end
+  end
+
+  class NestedAction
+    extend LightService::Action
+
+    expects :foo
+
+    executed do |context|
+      context[:bar] = context.foo
+    end
+  end
+
   class MakesTeaWithMilkAction
     extend LightService::Action
     expects :tea, :milk
@@ -149,13 +168,11 @@ module TestDoubles
     executed do |context|
       if context.milk == :very_hot
         context.fail!("Can't make a latte from a milk that's very hot!")
-        next context
       end
 
       if context.milk == :super_hot
         error_message = "Can't make a latte from a milk that's super hot!"
         context.fail_with_rollback!(error_message)
-        next context
       end
 
       context[:latte] = "#{context.coffee} - with lots of #{context.milk}"
@@ -236,6 +253,22 @@ module TestDoubles
     end
   end
 
+  class ExtraArgumentAdditionOrganizer
+    extend LightService::Organizer
+
+    def self.call(number, another_number)
+      with(:number => number + another_number).reduce(actions)
+    end
+
+    def self.actions
+      [
+        AddsOneAction,
+        AddsTwoAction,
+        AddsThreeAction
+      ]
+    end
+  end
+
   class AddsOneAction
     extend LightService::Action
     expects :number
@@ -258,10 +291,102 @@ module TestDoubles
   class AddsThreeAction
     extend LightService::Action
     expects :number
-    promises :product
 
     executed do |context|
-      context.product = context.number + 3
+      context.number += 3
+    end
+  end
+
+  class IterateOrganizer
+    extend LightService::Organizer
+
+    def self.call(ctx)
+      with(ctx).reduce(actions)
+    end
+
+    def self.actions
+      [
+        AddsOneIteratesAction,
+        iterate(:numbers, [
+                  AddsTwoAction,
+                  AddsThreeAction
+                ])
+      ]
+    end
+  end
+
+  class AddsOneIteratesAction
+    extend LightService::Action
+    expects :numbers
+    promises :numbers
+
+    executed do |context|
+      context.numbers = context.numbers.map { |n| n + 1 }
+    end
+  end
+
+  class CallbackOrganizer
+    extend LightService::Organizer
+
+    def self.call(ctx)
+      with(ctx).reduce(actions)
+    end
+
+    def self.actions
+      [
+        AddsOneAction,
+        with_callback(AddTenCallbackAction, [
+                        AddsTwoAction,
+                        AddsThreeAction
+                      ])
+      ]
+    end
+  end
+
+  class AddTenCallbackAction
+    extend LightService::Action
+    expects :number, :callback
+
+    executed do |context|
+      context.number += 10
+      context.number =
+        context.callback.call(context).fetch(:number)
+    end
+  end
+
+  class ReduceUntilOrganizer
+    extend LightService::Organizer
+
+    def self.call(ctx)
+      with(ctx).reduce(actions)
+    end
+
+    def self.actions
+      [
+        AddsOneAction,
+        reduce_until(->(ctx) { ctx.number > 3 }, [
+                       AddsTwoAction,
+                       AddsThreeAction
+                     ])
+      ]
+    end
+  end
+
+  class ReduceIfOrganizer
+    extend LightService::Organizer
+
+    def self.call(ctx)
+      with(ctx).reduce(actions)
+    end
+
+    def self.actions
+      [
+        AddsOneAction,
+        reduce_if(->(ctx) { ctx.number > 1 }, [
+                    AddsTwoAction,
+                    AddsThreeAction
+                  ])
+      ]
     end
   end
 
@@ -335,6 +460,87 @@ module TestDoubles
 
     executed do |ctx|
       ctx.final_key = ctx.expected_key
+    end
+  end
+
+  class NullAction
+    extend LightService::Action
+
+    executed { |_ctx| }
+  end
+
+  class TestIterate
+    extend LightService::Organizer
+
+    def self.call(context)
+      with(context)
+        .reduce([iterate(:counters,
+                         [TestDoubles::AddsOneAction])])
+    end
+
+    def self.call_single(context)
+      with(context)
+        .reduce([iterate(:counters,
+                         TestDoubles::AddsOneAction)])
+    end
+  end
+
+  class TestWithCallback
+    extend LightService::Organizer
+
+    def self.call(context = {})
+      with(context).reduce(actions)
+    end
+
+    def self.actions
+      [
+        SetUpContextAction,
+        with_callback(IterateCollectionAction,
+                      [IncrementCountAction,
+                       AddToTotalAction])
+      ]
+    end
+  end
+
+  class SetUpContextAction
+    extend LightService::Action
+    promises :numbers, :counter, :total
+
+    executed do |ctx|
+      ctx.numbers = [1, 2, 3]
+      ctx.counter = 0
+      ctx.total = 0
+    end
+  end
+
+  class IterateCollectionAction
+    extend LightService::Action
+    expects :numbers, :callback
+    promises :number
+
+    executed do |ctx|
+      ctx.numbers.each do |number|
+        ctx.number = number
+        ctx.callback.call(ctx)
+      end
+    end
+  end
+
+  class IncrementCountAction
+    extend LightService::Action
+    expects :counter
+
+    executed do |ctx|
+      ctx.counter = ctx.counter + 1
+    end
+  end
+
+  class AddToTotalAction
+    extend LightService::Action
+    expects :number, :total
+
+    executed do |ctx|
+      ctx.total += ctx.number
     end
   end
 end

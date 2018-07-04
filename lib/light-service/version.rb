@@ -1,3 +1,3 @@
 module LightService
-  VERSION = "0.8.1".freeze
+  VERSION = "0.11.0".freeze
 end

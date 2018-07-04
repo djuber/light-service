@@ -23,11 +23,11 @@ module LightService
       end
 
       def expected_keys
-        @_expected_keys ||= []
+        @expected_keys ||= []
       end
 
       def promised_keys
-        @_promised_keys ||= []
+        @promised_keys ||= []
       end
 
       def executed
@@ -41,7 +41,11 @@ module LightService
           Context::KeyVerifier.verify_keys(action_context, self) do
             action_context.define_accessor_methods_for_keys(all_keys)
 
-            yield(action_context)
+            catch(:jump_when_failed) do
+              call_before_action(action_context)
+              yield(action_context)
+              call_after_action(action_context)
+            end
           end
         end
       end
@@ -67,6 +71,24 @@ module LightService
 
       def all_keys
         expected_keys + promised_keys
+      end
+
+      def call_before_action(context)
+        invoke_callbacks(context[:_before_actions], context)
+      end
+
+      def call_after_action(context)
+        invoke_callbacks(context[:_after_actions], context)
+      end
+
+      def invoke_callbacks(callbacks, context)
+        return context unless callbacks
+
+        callbacks.each do |cb|
+          cb.call(context)
+        end
+
+        context
       end
     end
   end

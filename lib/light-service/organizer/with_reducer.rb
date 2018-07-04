@@ -1,7 +1,7 @@
 module LightService
   module Organizer
     class WithReducer
-      attr_reader :context, :around_each_handler
+      attr_reader :context
 
       def with(data = {})
         @context = LightService::Context.make(data)
@@ -13,21 +13,27 @@ module LightService
         self
       end
 
+      def around_each_handler
+        @around_each_handler ||= Class.new do
+          def self.call(_context)
+            yield
+          end
+        end
+      end
+
       def reduce(*actions)
         raise "No action(s) were provided" if actions.empty?
         actions.flatten!
 
-        actions.reduce(context) do |current_context, action|
+        actions.each_with_object(context) do |action, current_context|
           begin
-            result = invoke_action(current_context, action)
+            invoke_action(current_context, action)
           rescue FailWithRollbackError
-            result = reduce_rollback(actions)
+            reduce_rollback(actions)
           ensure
             # For logging
             yield(current_context, action) if block_given?
           end
-
-          result
         end
       end
 
@@ -46,10 +52,12 @@ module LightService
       private
 
       def invoke_action(current_context, action)
-        return action.execute(current_context) unless around_each_handler
-
         around_each_handler.call(current_context) do
-          action.execute(current_context)
+          if action.respond_to?(:call)
+            action.call(current_context)
+          else
+            action.execute(current_context)
+          end
         end
       end
 

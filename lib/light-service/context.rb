@@ -19,7 +19,6 @@ module LightService
       @error_code = error_code
       @skip_remaining = false
       context.to_hash.each { |k, v| self[k] = v }
-      self
     end
 
     def self.make(context = {})
@@ -87,6 +86,11 @@ module LightService
       @outcome = Outcomes::FAILURE
     end
 
+    def fail_and_return!(*args)
+      fail!(*args)
+      throw(:jump_when_failed, *args)
+    end
+
     def fail_with_rollback!(message = nil, error_code = nil)
       fail!(message, error_code)
       raise FailWithRollbackError
@@ -135,8 +139,29 @@ module LightService
       return super(key)
     end
 
-    def fetch(key, default_or_block = nil)
-      self[key] ||= super(key, default_or_block)
+    def fetch(key, default = nil, &blk)
+      self[key] ||= if block_given?
+                      super(key, &blk)
+                    else
+                      super
+                    end
+    end
+
+    def inspect
+      "#{self.class}(#{self}, " \
+      + "success: #{success?}, " \
+      + "message: #{check_nil(message)}, " \
+      + "error_code: #{check_nil(error_code)}, " \
+      + "skip_remaining: #{@skip_remaining}, " \
+      + "aliases: #{@aliases}" \
+      + ")"
+    end
+
+    private
+
+    def check_nil(value)
+      return 'nil' unless value
+      "'#{value}'"
     end
   end
   # rubocop:enable ClassLength

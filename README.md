@@ -3,6 +3,32 @@
 [![Gem Version](https://img.shields.io/gem/v/light-service.svg)](https://rubygems.org/gems/light-service)
 [![Build Status](https://secure.travis-ci.org/adomokos/light-service.png)](http://travis-ci.org/adomokos/light-service)
 [![Code Climate](https://codeclimate.com/github/adomokos/light-service.png)](https://codeclimate.com/github/adomokos/light-service)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](http://opensource.org/licenses/MIT)
+
+<br><br>
+
+![Orchestrators-Deprecated](resources/orchestrators_deprecated.svg)
+<br>Version 0.9.0 deprecates Orchestrators and moves all their functionalities into Organizers. Please check out [this PR](https://github.com/adomokos/light-service/pull/132) to see the changes.
+
+<br>
+
+## Table of Content
+* [Why LightService?](#why-lightservice)
+* [Stopping the Series of Actions](#stopping-the-series-of-actions)
+    * [Failing the Context](#failing-the-context)
+    * [Skipping the Rest of the Actions](#skipping-the-rest-of-the-actions)
+* [Benchmarking Actions with Around Advice](#benchmarking-actions-with-around-advice)
+* [Before and After Action Hooks](#before-and-after-action-hooks)
+* [Key Aliases](#key-aliases)
+* [Logging](#logging)
+* [Error Codes](#error-codes)
+* [Action Rollback](#action-rollback)
+* [Localizing Messages](#localizing-messages)
+* [Orchestrator Logic in Organizers](#orchestrator-logic-in-organizers)
+* [ContextFactory for Faster Action Testing](#contextfactory-for-faster-action-testing)
+
+
+## Why LightService?
 
 What do you think of this code?
 
@@ -107,8 +133,10 @@ class CalculatesOrderTaxAction
   extend ::LightService::Action
   expects :order, :tax_percentage
 
-  executed do |context|
-    order.tax = (order.total * (tax_percentage/100)).round(2)
+  # I am using ctx as an abbreviation for context
+  executed do |ctx|
+    order = ctx.order
+    order.tax = (order.total * (ctx.tax_percentage/100)).round(2)
   end
 
 end
@@ -117,9 +145,9 @@ class ProvidesFreeShippingAction
   extend LightService::Action
   expects :order
 
-  executed do |context|
-    if order.total_with_tax > 200
-      order.provide_free_shipping!
+  executed do |ctx|
+    if ctx.order.total_with_tax > 200
+      ctx.order.provide_free_shipping!
     end
   end
 end
@@ -147,18 +175,6 @@ I gave a [talk at RailsConf 2013](http://www.adomokos.com/2013/06/simple-and-ele
 simple and elegant Rails code where I told the story of how LightService was extracted from the projects I had worked on.
 
 
-## Table of Content
-* [Stopping the Series of Actions](#stopping-the-series-of-actions)
-    * [Failing the Context](#failing-the-context)
-    * [Skipping the Rest of the Actions](#skipping-the-rest-of-the-actions)
-* [Benchmarking Actions with Around Advice](#benchmarking-actions-with-around-advice)
-* [Key Aliases](#key-aliases)
-* [Logging](#logging)
-* [Error Codes](#error-codes)
-* [Action Rollback](#action-rollback)
-* [Localizing Messages](#localizing-messages)
-* [Orchestrators](#orchestrators)
-* [ContextFactory for Faster Action Testing](#contextfactory-for-faster-action-testing)
 
 ## Stopping the Series of Actions
 When nothing unexpected happens during the organizer's call, the returned `context` will be successful. Here is how you can check for this:
@@ -187,6 +203,9 @@ When something goes wrong in an action and you want to halt the chain, you need 
 The context's `fail!` method can take an optional message argument, this message might help describing what went wrong.
 In case you need to return immediately from the point of failure, you have to do that by calling `next context`.
 
+In case you want to fail the context and stop the execution of the executed block, use the `fail_and_return!('something went wrong')` method.
+This will immediately leave the block, you don't need to call `next context` to return from the block.
+
 Here is an example:
 ```ruby
 class SubmitsOrderAction
@@ -195,10 +214,10 @@ class SubmitsOrderAction
 
   executed do |context|
     unless context.order.submit_order_successful?
-      context.fail!("Failed to submit the order")
-      next context
+      context.fail_and_return!("Failed to submit the order")
     end
 
+    # This won't be executed
     context.mailer.send_order_notification!
   end
 end
@@ -237,12 +256,12 @@ Check out this example:
 
 ```ruby
 class LogDuration
-  def self.call(action, context)
+  def self.call(context)
     start_time = Time.now
     result = yield
     duration = Time.now - start_time
     LightService::Configuration.logger.info(
-      :action   => action,
+      :action   => context.current_action,
       :duration => duration
     )
 
@@ -265,6 +284,103 @@ end
 
 Any object passed into `around_each` must respond to #call with two arguments: the action name and the context it will execute with. It is also passed a block, where LightService's action execution will be done in, so the result must be returned. While this is a little work, it also gives you before and after state access to the data for any auditing and/or checks you may need to accomplish.
 
+## Before and After Action Hooks
+
+In case you need to inject code right before and after the actions are executed, you can use the `before_actions` and `after_actions` hooks. It accepts one or multiple lambdas that the Action implementation will invoke. This addition to LightService is a great way to decouple instrumentation from business logic.
+
+Consider this code:
+
+```ruby
+class SomeOrganizer
+  extend LightService::Organizer
+
+  def call(ctx)
+    with(ctx).reduce(actions)
+  end
+
+  def actions
+    OneAction,
+    TwoAction,
+    ThreeAction
+  end
+end
+
+class TwoAction
+  extend LightService::Action
+  expects :user, :logger
+
+  executed do |ctx|
+    # Logging information
+    if ctx.user.role == 'admin'
+       ctx.logger.info('admin is doing something')
+    end
+
+    ctx.user.do_something
+  end
+end
+```
+
+The logging logic makes `TwoAction` more complex, there is more code for logging than for business logic.
+
+You have two options to decouple instrumentation from real logic with `before_actions` and `after_actions` hooks:
+
+1. Declare your hooks in the Organizer
+2. Attach hooks to the Organizer from the outside
+
+This is how you can declaratively add before and after hooks to the Organizer:
+
+```ruby
+class SomeOrganizer
+  extend LightService::Organizer
+  before_actions (lambda do |ctx|
+                           if ctx.current_action == TwoAction
+                             return unless ctx.user.role == 'admin'
+                             ctx.logger.info('admin is doing something')
+                           end
+                         end)
+  after_actions (lambda do |ctx|
+                          if ctx.current_action == TwoAction
+                            return unless ctx.user.role == 'admin'
+                            ctx.logger.info('admin is DONE doing something')
+                          end
+                        end)
+
+  def call(ctx)
+    with(ctx).reduce(actions)
+  end
+
+  def actions
+    OneAction,
+    TwoAction,
+    ThreeAction
+  end
+end
+
+class TwoAction
+  extend LightService::Action
+  expects :user
+
+  executed do |ctx|
+    ctx.user.do_something
+  end
+end
+```
+
+Note how the action has no logging logic after this change. Also, you can target before and after action logic for specific actions, as the `ctx.current_action` will have the class name of the currently processed action. In the example above, logging will occur only for `TwoAction` and not for `OneAction` or `ThreeAction`.
+
+Here is how you can declaratively add `before_hooks` or `after_hooks` to your Organizer from the outside:
+
+```ruby
+SomeOrganizer.before_actions =
+  lambda do |ctx|
+    if ctx.current_action == TwoAction
+      return unless ctx.user.role == 'admin'
+      ctx.logger.info('admin is doing something')
+    end
+  end
+```
+
+These ideas are originally from Aspect Oriented Programming, read more about them [here](https://en.wikipedia.org/wiki/Aspect-oriented_programming).
 
 ## Expects and Promises
 The `expects` and `promises` macros are rules for the inputs/outputs of an action.
@@ -573,7 +689,7 @@ end
 
 To get the value of a `fail!` or `succeed!` message, simply call `#message` on the returned context.
 
-## Orchestrators
+## Orchestrator Logic in Organizers
 
 The Organizer - Action combination works really well for simple use cases. However, as business logic gets more complex, or when LightService is used in an ETL workflow, the code that routes the different organizers becomes very complex and imperative. Let's look at a piece of code that does basic data transformations:
 
@@ -604,20 +720,20 @@ The `LightService::Context` is initialized with the first action, that context i
 
 ```ruby
 class ExtractsTransformsLoadsData
-  extend LightService::Orchestrator
+  extend LightService::Organizer
 
-  def self.run(connection)
-    with(:connection => connection).reduce(steps)
+  def self.call(connection)
+    with(:connection => connection).reduce(actions)
   end
 
-  def self.steps
+  def self.actions
     [
       RetrievesConnectionInfo,
       PullsDataFromRemoteApi,
       reduce_if(->(ctx) { ctx.retrieved_items.empty? }, [
         NotifiesEngineeringTeamAction
       ]),
-      iterate(:retrieved_item, [
+      iterate(:retrieved_items, [
         TransformsData
       ]),
       LoadsData,
@@ -629,37 +745,23 @@ end
 
 This code is much easier to reason about, it's less noisy and it captures the goal of LightService well: simple, declarative code that's easy to understand.
 
-Our convention for naming the public methods on the different items at different levels is this:
-```
-Orchestrators
-   |-> run - steps
-   Organizers
-       |-> call - actions
-       Actions
-           |-> execute
-```
+The 5 different orchestrator constructs an organizer can have:
 
-You can mix organizers with actions in the orchestrator steps, but mixing other organizers with actions in an organizer is discouraged for the sake of simplicity.
+1. `reduce_until`
+2. `reduce_if`
+3. `iterate`
+4. `execute`
+5. `with_callback`
 
-The 5 different constructs an orchestrator can have:
+`reduce_until` behaves like a while loop in imperative languages, it iterates until the provided predicate in the lambda evaluates to true. Take a look at [this acceptance test](spec/acceptance/organizer/reduce_until_spec.rb) to see how it's used.
 
-1. `reduce`
-2. `reduce_until`
-3. `reduce_if`
-4. `iterate`
-5. `execute`
+`reduce_if` will reduce the included organizers and/or actions if the predicate in the lambda evaluates to true. [This acceptance test](spec/acceptance/organizer/reduce_if_spec.rb) describes this functionality.
 
-The `reduce` method needs no interaction, it behaves similarly to organizers' `reduce` method.
+`iterate` gives your iteration logic, the symbol you define there has to be in the context as a key. For example, to iterate over items you will use `iterate(:items)` in your steps, the context needs to have `items` as a key, otherwise it will fail. The organizer will singularize the collection name and will put the actual item into the context under that name. Remaining with the example above, each element will be accessible by the name `item` for the actions in the `iterate` steps. [This acceptance test](spec/acceptance/organizer/iterate_spec.rb) should provide you with an example.
 
-`reduce_until` behaves like a while loop in imperative languages, it iterates until the provided predicate in the lambda evaluates to true. Take a look at [this acceptance test](spec/acceptance/orchestrator/reduce_until_spec.rb) to see how it's used.
+To take advantage of another organizer or action, you might need to tweak the context a bit. Let's say you have a hash, and you need to iterate over its values in a series of action. To alter the context and have the values assigned into a variable, you need to create a new action with 1 line of code in it. That seems a lot of ceremony for a simple change. You can do that in a `execute` method like this `execute(->(ctx) { ctx[:some_values] = ctx.some_hash.values })`. [This test](spec/acceptance/organizer/execute_spec.rb) describes how you can use it.
 
-`reduce_if` will reduce the included organizers and/or actions if the predicate in the lambda evaluates to true. [This acceptance test](spec/acceptance/orchestrator/reduce_if_spec.rb) describes this functionality.
-
-`iterate` gives your iteration logic, the symbol you define there has to be in the context as a key. For example. to iterate over items you will use `iterate(:items)` in your steps, the context needs to have `items` as a key, otherwise it will fail. The orchestrator will singularize the collection name and will put the actual item into the context under that name. Remaining with the example above, each element will be accessible by the name `item` for the actions in the `iterate` steps. [This acceptance test](spec/acceptance/orchestrator/iterate_spec.rb) should provide you with an example.
-
-To take advantage of another organizer or action, you might need to tweak the context a bit. Let's say you have a hash, and you need to iterate over its values in a series of action. To alter the context and have the values assigned into a variable, you need to create a new action with 1 line of code in it. That seems a lot of ceremony for a simple change. You can do that in a `execute` method like this `execute(->(ctx) { ctx[:some_values] = ctx.some_hash.values })`. [This test](spec/acceptance/orchestrator/execute_spec.rb) describes how you can use it.
-
-** Thanks to [@bwvoss](https://github.com/bwvoss) for writing most of the Orchestrators code, I only ported his changes to LS and submitted the PR.
+Use `with_callback` when you want to execute actions with a deferred and controlled callback. It works similar to a Sax parser, I've used it for processing large files. The advantage of it is not having to keep large amount of data in memory. See [this acceptance test](spec/acceptance/organizer/with_callback_spec.rb) as a working example.
 
 ## ContextFactory for Faster Action Testing
 
