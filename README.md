@@ -1,9 +1,10 @@
 ![LightService](https://raw.githubusercontent.com/adomokos/light-service/master/resources/light-service.png)
 
 [![Gem Version](https://img.shields.io/gem/v/light-service.svg)](https://rubygems.org/gems/light-service)
-[![Build Status](https://secure.travis-ci.org/adomokos/light-service.png)](http://travis-ci.org/adomokos/light-service)
-[![Code Climate](https://codeclimate.com/github/adomokos/light-service.png)](https://codeclimate.com/github/adomokos/light-service)
+[![Build Status](https://secure.travis-ci.org/adomokos/light-service.svg)](http://travis-ci.org/adomokos/light-service)
+[![Code Climate](https://codeclimate.com/github/adomokos/light-service.svg)](https://codeclimate.com/github/adomokos/light-service)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](http://opensource.org/licenses/MIT)
+[![Download Count](https://ruby-gem-downloads-badge.herokuapp.com/light-service?type=total)](https://rubygems.org/gems/light-service)
 
 <br><br>
 
@@ -78,7 +79,7 @@ Wouldn't it be nice to see this instead?
 (
   LooksUpTaxPercentage,
   CalculatesOrderTax,
-  ChecksFreeShipping
+  ProvidesFreeShipping
 )
 ```
 
@@ -294,14 +295,16 @@ Consider this code:
 class SomeOrganizer
   extend LightService::Organizer
 
-  def call(ctx)
+  def self.call(ctx)
     with(ctx).reduce(actions)
   end
 
-  def actions
-    OneAction,
-    TwoAction,
-    ThreeAction
+  def self.actions
+    [
+      OneAction,
+      TwoAction,
+      ThreeAction
+    ]
   end
 end
 
@@ -345,14 +348,16 @@ class SomeOrganizer
                           end
                         end)
 
-  def call(ctx)
+  def self.call(ctx)
     with(ctx).reduce(actions)
   end
 
-  def actions
-    OneAction,
-    TwoAction,
-    ThreeAction
+  def self.actions
+    [
+      OneAction,
+      TwoAction,
+      ThreeAction
+    ]
   end
 end
 
@@ -451,9 +456,9 @@ class AnOrganizer
 
   def self.call(order)
     with(:order => order).reduce(
-        AnAction,
-        AnotherAction,
-      )
+      AnAction,
+      AnotherAction,
+    )
   end
 end
 
@@ -534,6 +539,15 @@ I, [DATE]  INFO -- : [LightService] - ;-) <TestDoubles::MakesLatteAction> has de
 I, [DATE]  INFO -- : [LightService] - context message: Can't make a latte with a fatty milk like that!
 ```
 
+You can specify the logger on the organizer level, so the organizer does not use the global logger.
+
+```ruby
+class FooOrganizer
+  extend LightService::Organizer
+  log_with Logger.new("/my/special.log")
+end
+```
+
 ## Error Codes
 You can add some more structure to your error handling by taking advantage of error codes in the context.
 Normally, when something goes wrong in your actions, you fail the process by setting the context to failure:
@@ -610,7 +624,28 @@ Using the `rolled_back` macro is optional for the actions in the chain. You shou
 
 The actions are rolled back in reversed order from the point of failure starting with the action that triggered it.
 
-See [this](spec/acceptance/rollback_spec.rb) acceptance test to learn more about this functionality.
+See [this acceptance test](spec/acceptance/rollback_spec.rb) to learn more about this functionality.
+
+You may find yourself directly using an action that can roll back by calling `.execute` instead of using it from within an Organizer.
+If this action fails and attempts a rollback, a `FailWithRollbackError` exception will be raised. This is so that the organizer can
+rollback the actions one by one. If you don't want to wrap your call to the action with a `begin, rescue FailWithRollbackError`
+block, you can introspect the context like so, and keep your usage of the action clean:
+
+```ruby
+class FooAction
+  extend LightService::Action
+
+  executed do |context|
+    # context.organized_by will be nil if run from an action,
+    # or will be the class name if run from an organizer
+    if context.organized_by.nil?
+      context.fail!
+    else
+      context.fail_with_rollback!
+    end
+  end
+end
+```
 
 ## Localizing Messages
 By default LightService provides a mechanism for easily translating your error or success messages via I18n.  You can also provide your own custom localization adapter if your application's logic is more complex than what is shown here.
@@ -745,13 +780,15 @@ end
 
 This code is much easier to reason about, it's less noisy and it captures the goal of LightService well: simple, declarative code that's easy to understand.
 
-The 5 different orchestrator constructs an organizer can have:
+The 7 different orchestrator constructs an organizer can have:
 
 1. `reduce_until`
 2. `reduce_if`
 3. `iterate`
 4. `execute`
 5. `with_callback`
+6. `add_to_context`
+7. `add_aliases`
 
 `reduce_until` behaves like a while loop in imperative languages, it iterates until the provided predicate in the lambda evaluates to true. Take a look at [this acceptance test](spec/acceptance/organizer/reduce_until_spec.rb) to see how it's used.
 
@@ -762,6 +799,10 @@ The 5 different orchestrator constructs an organizer can have:
 To take advantage of another organizer or action, you might need to tweak the context a bit. Let's say you have a hash, and you need to iterate over its values in a series of action. To alter the context and have the values assigned into a variable, you need to create a new action with 1 line of code in it. That seems a lot of ceremony for a simple change. You can do that in a `execute` method like this `execute(->(ctx) { ctx[:some_values] = ctx.some_hash.values })`. [This test](spec/acceptance/organizer/execute_spec.rb) describes how you can use it.
 
 Use `with_callback` when you want to execute actions with a deferred and controlled callback. It works similar to a Sax parser, I've used it for processing large files. The advantage of it is not having to keep large amount of data in memory. See [this acceptance test](spec/acceptance/organizer/with_callback_spec.rb) as a working example.
+
+`add_to_context` can add key-value pairs on the fly to the context. This functionality is useful when you need a value injected into the context under a specific key right before the subsequent actions are executed. [This test](spec/acceptance/organizer/add_to_context_spec.rb) describes its functionality.
+
+Your action needs a certain key in the context but it's under a different one? Use the function `add_aliases` to alias an existing key in the context under the desired key. Take a look at [this test](spec/acceptance/organizer/add_aliases_spec.rb) to see an example.
 
 ## ContextFactory for Faster Action Testing
 

@@ -8,7 +8,7 @@ module LightService
 
   # rubocop:disable ClassLength
   class Context < Hash
-    attr_accessor :message, :error_code, :current_action
+    attr_accessor :message, :error_code, :current_action, :organized_by
 
     def initialize(context = {},
                    outcome = Outcomes::SUCCESS,
@@ -18,6 +18,7 @@ module LightService
       @message = message
       @error_code = error_code
       @skip_remaining = false
+
       context.to_hash.each { |k, v| self[k] = v }
     end
 
@@ -88,7 +89,7 @@ module LightService
 
     def fail_and_return!(*args)
       fail!(*args)
-      throw(:jump_when_failed, *args)
+      throw(:jump_when_failed)
     end
 
     def fail_with_rollback!(message = nil, error_code = nil)
@@ -115,8 +116,10 @@ module LightService
 
     def define_accessor_methods_for_keys(keys)
       return if keys.nil?
+
       keys.each do |key|
         next if respond_to?(key.to_sym)
+
         define_singleton_method(key.to_s) { fetch(key) }
         define_singleton_method("#{key}=") { |value| self[key] = value }
       end
@@ -161,6 +164,7 @@ module LightService
 
     def check_nil(value)
       return 'nil' unless value
+
       "'#{value}'"
     end
   end

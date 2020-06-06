@@ -1,10 +1,16 @@
 module LightService
   module Organizer
     class WithReducer
-      attr_reader :context
+      attr_reader   :context
+      attr_accessor :organizer
+
+      def initialize(monitored_organizer = nil)
+        @organizer = monitored_organizer
+      end
 
       def with(data = {})
         @context = LightService::Context.make(data)
+        @context.organized_by = organizer
         self
       end
 
@@ -23,6 +29,7 @@ module LightService
 
       def reduce(*actions)
         raise "No action(s) were provided" if actions.empty?
+
         actions.flatten!
 
         actions.each_with_object(context) do |action, current_context|

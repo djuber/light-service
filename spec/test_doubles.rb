@@ -269,6 +269,18 @@ module TestDoubles
     end
   end
 
+  class AddsOne
+    extend LightService::Organizer
+
+    def call(ctx)
+      with(ctx).reduce(actions)
+    end
+
+    def self.actions
+      [AddsOneAction]
+    end
+  end
+
   class AddsOneAction
     extend LightService::Action
     expects :number
@@ -541,6 +553,41 @@ module TestDoubles
 
     executed do |ctx|
       ctx.total += ctx.number
+    end
+  end
+
+  class CapitalizeMessage
+    extend LightService::Action
+    expects :a_message
+    promises :final_message
+
+    executed do |ctx|
+      ctx.final_message = ctx.a_message.upcase
+    end
+  end
+
+  class AnOrganizerThatAddsToContext
+    extend LightService::Organizer
+    def self.call
+      with.reduce(actions)
+    end
+
+    def self.actions
+      [add_to_context(
+        :strongest_avenger => 'The Thor',
+        :last_jedi => 'Rey'
+      )]
+    end
+  end
+
+  class AnOrganizerThatAddsAliases
+    extend LightService::Organizer
+    def self.call
+      with(:foo => :bar).reduce(actions)
+    end
+
+    def self.actions
+      [add_aliases(:foo => :baz)]
     end
   end
 end

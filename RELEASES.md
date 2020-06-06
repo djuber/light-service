@@ -1,5 +1,15 @@
 A brief list of new features and changes introduced with the specified version.
 
+### 0.14.0
+* [Add 'organized_by' to context](https://github.com/adomokos/light-service/pull/192) - Context now have an #organized_by attribute
+
+### 0.13.0
+* [Add 'add_to_context' and 'add_aliases'](https://github.com/adomokos/light-service/pull/172) - Updating Ruby compatibility, minor fixes
+
+### 0.12.0
+* [Per organizer logger](https://github.com/adomokos/light-service/pull/162)
+* [Fix 'fail_and_return!' not accepting 'error_code' option](https://github.com/adomokos/light-service/pull/168)
+
 ### 0.11.0
 * [Switch to 'each_with_object' in WithReducer](https://github.com/adomokos/light-service/pull/149).
 
